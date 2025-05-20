@@ -17,7 +17,8 @@ defmodule Md5Manager do
           solved_hashes: %{binary() => String.t()},
           available_indexes: Range.t() | :empty,
           allotted_ranges: MapSet.t(Range.t() | :empty),
-          searched_ranges: MapSet.t(Range.t() | :empty)
+          searched_ranges: MapSet.t(Range.t() | :empty),
+          password_size: pos_integer()
         }
 
   @spec start_link({MapSet.t(binary()), pos_integer()}) :: GenServer.on_start()
@@ -36,35 +37,18 @@ defmodule Md5Manager do
         solved_hashes: %{},
         available_indexes: 0..total_permutations,
         allotted_ranges: MapSet.new(),
-        searched_ranges: MapSet.new()
+        searched_ranges: MapSet.new(),
+        password_size: password_size
       },
       {
         :continue,
-        {:spawn_workers, password_size}
+        {:spawn_workers}
       }
     }
   end
 
-  def handle_continue({:spawn_workers, password_size}, state) do
-    # This will calculate the total number of workers to
-    # search the 
-    ceil_div = fn a, b -> div(a + b - 1, b) end
-    remaining_workers_needed = ceil_div.(state.available_indexes.last, @chunk_size)
-
-    for _ <- 1..remaining_workers_needed do
-      DynamicSupervisor.start_child(
-        Md5WorkerSupervisor,
-        %{
-          id: Md5Worker,
-          start: {Md5Worker, :start_link, [{Md5Manager, password_size}]},
-          restart: :temporary,
-          type: :worker
-        }
-      )
-    end
-
-    IO.puts("Spawned #{remaining_workers_needed} workers")
-
+  def handle_continue({:spawn_workers}, state) do
+    spawn_workers(state)
     {:noreply, state}
   end
 
@@ -87,6 +71,27 @@ defmodule Md5Manager do
       | allotted_ranges: MapSet.delete(state.allotted_ranges, range),
         searched_ranges: MapSet.put(state.searched_ranges, range)
     }
+
+    active_processes = MapSet.size(new_state.allotted_ranges)
+
+    case state.available_indexes do
+      %Range{} = _ ->
+        indexes_finished = state.available_indexes.first
+        total_indexes = state.available_indexes.last
+        indexes_being_processed = active_processes * @chunk_size
+
+        IO.puts(
+          "finished searching #{range.first} to #{range.last}. #{active_processes} active processes. #{Float.round((indexes_finished - indexes_being_processed) / total_indexes * 100, 2)}%"
+        )
+
+      :empty ->
+        IO.puts("All indexes searched. 100% complete :D")
+        IO.inspect(state.solved_hashes)
+    end
+
+    if active_processes == 100 do
+      spawn_workers(new_state)
+    end
 
     {:noreply, new_state}
   end
@@ -115,5 +120,43 @@ defmodule Md5Manager do
       start + size >= stop -> {start..stop, :empty}
       true -> {start..(start + size), (start + size)..stop}
     end
+  end
+
+  @spec spawn_workers(state) :: :ok
+  defp spawn_workers(%{available_indexes: :empty} = _state) do
+    :ok
+  end
+
+  defp spawn_workers(state) do
+    # Spawns workers while respecting
+    # @max_concurrent_workers
+
+    num_active_workers = MapSet.size(state.allotted_ranges)
+    available_slots = max(@max_concurrent_workers - num_active_workers, 0)
+
+    # This will calculate the total number of workers to
+    # search the 
+    ceil_div = fn a, b -> div(a + b - 1, b) end
+
+    remaining_workers_needed =
+      ceil_div.(state.available_indexes.last - state.available_indexes.first, @chunk_size)
+
+    workers_to_spawn = min(remaining_workers_needed, available_slots)
+
+    for _ <- 1..workers_to_spawn do
+      DynamicSupervisor.start_child(
+        Md5WorkerSupervisor,
+        %{
+          id: Md5Worker,
+          start: {Md5Worker, :start_link, [{Md5Manager, state.password_size}]},
+          restart: :temporary,
+          type: :worker
+        }
+      )
+    end
+
+    # IO.puts("Spawned #{workers_to_spawn} worker(s)")
+
+    :ok
   end
 end

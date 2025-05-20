@@ -28,10 +28,6 @@ defmodule Md5Worker do
       _ ->
         send(self(), {:search_range, {range, unsolved_hashes}})
 
-        IO.puts(
-          "Got range #{range.first}, #{range.last}, and #{MapSet.size(unsolved_hashes)} hashes"
-        )
-
         {:noreply, state}
     end
   end
@@ -50,7 +46,6 @@ defmodule Md5Worker do
       )
 
     search_range(permutations, range, unsolved_hashes, state)
-    IO.puts("finished searching #{range.first}..#{range.last}, shutting down")
     {:stop, :normal, state}
   end
 

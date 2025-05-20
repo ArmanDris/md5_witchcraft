@@ -1,7 +1,7 @@
 defmodule Md5App.Application do
   use Application
 
-  @password_len 5
+  @password_len 6
 
   def start(_type, _args) do
     IO.inspect(Mix.env())
@@ -11,9 +11,9 @@ defmodule Md5App.Application do
     else
       hashes =
         MapSet.new([
-          :crypto.hash(:md5, "zzzzz"),
-          :crypto.hash(:md5, "aaaaa"),
-          :crypto.hash(:md5, "lllll")
+          :crypto.hash(:md5, "zzzzzz"),
+          :crypto.hash(:md5, "aaaaaa"),
+          :crypto.hash(:md5, "llllll")
         ])
 
       children = [
