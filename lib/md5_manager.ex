@@ -52,6 +52,11 @@ defmodule Md5Manager do
     {:noreply, state}
   end
 
+  def handle_info(:shutdown, state) do
+    IO.puts("Shutting down MD5 manager")
+    {:stop, :normal, state}
+  end
+
   def handle_cast({:found, hash, word}, state) do
     IO.puts("Found match for #{Base.encode16(hash, case: :lower)}: #{word}")
 
@@ -74,19 +79,45 @@ defmodule Md5Manager do
 
     active_processes = MapSet.size(new_state.allotted_ranges)
 
-    case state.available_indexes do
-      %Range{} = _ ->
-        indexes_finished = state.available_indexes.first
-        total_indexes = state.available_indexes.last
+    case {new_state.available_indexes, new_state.allotted_ranges} do
+      {:empty, allotted_ranges} ->
+        if MapSet.size(allotted_ranges) == 0 do
+          IO.puts("All indexes searched. All processes finished")
+          IO.inspect(new_state.solved_hashes)
+          send(self(), :shutdown)
+        else
+          # This might be slighly off because the last index may be smaller
+          # than chunk size
+          num_indexes_left = MapSet.size(new_state.allotted_ranges) * @chunk_size
+
+          total_indexes = :math.pow(@base, new_state.password_size)
+
+          percent_finished =
+            (total_indexes - num_indexes_left) / total_indexes * 100
+
+          percent_finished_formatted =
+            :io_lib.format("~.2f", [percent_finished]) |> List.to_string()
+
+          IO.puts(
+            "\t #{percent_finished_formatted}% searched \t #{active_processes} active processes"
+          )
+        end
+
+      {_, _} ->
+        indexes_finished = new_state.available_indexes.first
+        total_indexes = new_state.available_indexes.last
+
         indexes_being_processed = active_processes * @chunk_size
 
-        IO.puts(
-          "finished searching #{range.first} to #{range.last}. #{active_processes} active processes. #{Float.round((indexes_finished - indexes_being_processed) / total_indexes * 100, 2)}%"
-        )
+        percent_finished =
+          (indexes_finished - indexes_being_processed) / total_indexes * 100
 
-      :empty ->
-        IO.puts("All indexes searched. 100% complete :D")
-        IO.inspect(state.solved_hashes)
+        percent_finished_formatted =
+          :io_lib.format("~.2f", [percent_finished]) |> List.to_string()
+
+        IO.puts(
+          "\t #{percent_finished_formatted}% searched \t #{active_processes} active processes"
+        )
     end
 
     if active_processes == 100 do
